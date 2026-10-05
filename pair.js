@@ -1,5 +1,5 @@
 'use strict';
-// Local administrator CLI. Run with the same DATA_DIR/.env as the stopped server.
+// Local administrator CLI. Run with the same DATA_DIR and settings.env as the stopped server.
 const fs=require('fs'),path=require('path');
 async function main(){
  const [action,file,url]=process.argv.slice(2);
