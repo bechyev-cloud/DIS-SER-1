@@ -18,5 +18,8 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.4.0",
     "node-cron": "^4.6.0"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }
