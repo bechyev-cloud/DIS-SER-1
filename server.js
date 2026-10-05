@@ -42,9 +42,12 @@ app.get('/api/replication/export', replication.authorize, function(req,res,next)
   try{const n=req.query.cursor===undefined?null:Number(req.query.cursor);if(n!==null&&(!Number.isSafeInteger(n)||n<0))return res.status(400).json({error:'Неверный курсор'});res.set('Cache-Control','no-store');res.json(replication.exportData(n));}catch(e){next(e);}
 });
 app.get('/connection-config.js', function(req,res){res.type('js').set('Cache-Control','no-store').send('window.DISCIPLINE_CONFIG='+JSON.stringify({standard:config.standardServer})+';');});
-app.use('/shared',express.static(path.join(__dirname,'../shared')));
-app.use('/user',express.static(path.join(__dirname,'../user-pwa')));
-app.use('/admin',express.static(path.join(__dirname,'../admin-pwa')));
+// Папки приложений ищем рядом с сервером (../user-pwa) или внутри него (./user-pwa) — так
+// проект работает и когда на хостинг загружена вся папка, и когда только содержимое server.
+function appDir(name){const candidates=[path.join(__dirname,'..',name),path.join(__dirname,name)];const found=candidates.find(d=>{try{return fs.statSync(d).isDirectory();}catch(e){return false;}});if(!found)console.warn('[server] Папка '+name+' не найдена рядом с сервером — этот раздел открываться не будет.');return found||candidates[0];}
+app.use('/shared',express.static(appDir('shared')));
+app.use('/user',express.static(appDir('user-pwa')));
+app.use('/admin',express.static(appDir('admin-pwa')));
 app.get('/',function(req,res){res.redirect('/user/');});
 app.use('/api', replication.proxy);
 app.use('/api', require('./lib/idempotency'));
