@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "postinstall": "node scripts/check-native.js",
+    "prestart": "node scripts/check-native.js"
   },
   "license": "UNLICENSED",
   "dependencies": {
