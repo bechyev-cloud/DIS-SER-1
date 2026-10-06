@@ -171,6 +171,22 @@ router.post('/:id/leave', requireAuth, function (req, res, next) {
 
 /* ---- trainer: assign habits/tasks to whole group or to one student (раздел 20) ---- */
 
+// Состав группы для её участника: тренер, участники и задания (общие и личные для него самого).
+router.get('/:id/roster', requireAuth, function (req, res, next) {
+  try {
+    const g = db.prepare('SELECT g.*, t.display_name AS trainer_name, t.avatar_emoji AS trainer_emoji FROM groups g JOIN users t ON t.id = g.trainer_id WHERE g.id = ?').get(Number(req.params.id));
+    const allowed = g && (g.trainer_id === req.user.id || db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(g.id, req.user.id));
+    if (!allowed) throw badRequest('Группа недоступна.');
+    const members = db.prepare(`SELECT u.id, u.display_name, u.avatar_emoji FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ? AND u.status = 'active' ORDER BY u.display_name`).all(g.id);
+    const habits = db.prepare('SELECT id, name, emoji, target_user_id FROM habits WHERE group_id = ? AND assigned_by IS NOT NULL AND (target_user_id IS NULL OR target_user_id = ? OR ? = 1)').all(g.id, req.user.id, g.trainer_id === req.user.id ? 1 : 0);
+    res.json({
+      group: { id: g.id, name: g.name, description: g.description, trainerName: g.trainer_name, trainerEmoji: g.trainer_emoji },
+      members: members.map(function (m) { return { id: m.id, displayName: m.display_name, avatarEmoji: m.avatar_emoji, me: m.id === req.user.id }; }),
+      habits: habits.map(function (h) { return { id: h.id, name: h.name, emoji: h.emoji, personal: !!h.target_user_id }; })
+    });
+  } catch (e) { next(e); }
+});
+
 router.get('/:id/habits', requireAuth, requireRole('TRAINER', 'ADMIN'), function (req, res, next) {
   try {
     const g = ownedGroupOrThrow(req.params.id, req.user.id);
@@ -208,7 +224,8 @@ router.get('/:id/habits/:habitId/progress', requireAuth, requireRole('TRAINER', 
         id: u.id, displayName: u.display_name, username: u.username,
         doneCount: doneCount,
         lastProgress: last ? JSON.parse(last.progress_json || '{}') : null,
-        lastDate: last ? last.date_key : null
+        lastDate: last ? last.date_key : null,
+        lastDoneDate: (db.prepare('SELECT MAX(date_key) AS d FROM habit_logs WHERE habit_id = ? AND user_id = ? AND done = 1').get(habit.id, u.id) || {}).d || null
       };
     });
     res.json({ targetUserId: habit.target_user_id || null, students: result });
@@ -238,6 +255,26 @@ router.post('/:id/habits', requireAuth, requireRole('TRAINER', 'ADMIN'), functio
       g.id, req.user.id, targetUserId, new Date().toISOString().slice(0, 10), t
     );
     res.status(201).json({ id: id, name: name, targetUserId: targetUserId });
+  } catch (e) { next(e); }
+});
+
+// Изменение задания: название, значок и кому назначено (вся группа или один ученик).
+router.patch('/:id/habits/:habitId', requireAuth, requireRole('TRAINER', 'ADMIN'), function (req, res, next) {
+  try {
+    const g = ownedGroupOrThrow(req.params.id, req.user.id);
+    const habit = db.prepare('SELECT * FROM habits WHERE id = ? AND group_id = ? AND assigned_by IS NOT NULL').get(req.params.habitId, g.id);
+    if (!habit) throw badRequest('Задание не найдено.');
+    const body = req.body || {};
+    const name = body.name === undefined ? habit.name : String(body.name || '').trim().slice(0, 200);
+    if (!name) throw badRequest('Укажите название задания.');
+    const emoji = body.emoji === undefined ? habit.emoji : (String(body.emoji || '').trim().slice(0, 8) || '🎯');
+    let targetUserId = habit.target_user_id || null;
+    if (body.targetUserId !== undefined) {
+      targetUserId = body.targetUserId ? Number(body.targetUserId) : null;
+      if (targetUserId && !db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(g.id, targetUserId)) throw badRequest('Этот ученик не состоит в группе.');
+    }
+    db.prepare('UPDATE habits SET name = ?, emoji = ?, target_user_id = ?, updated_at = ? WHERE id = ?').run(name, emoji, targetUserId, Date.now(), habit.id);
+    res.json({ id: habit.id, name: name, emoji: emoji, targetUserId: targetUserId });
   } catch (e) { next(e); }
 });
 

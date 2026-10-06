@@ -6,10 +6,33 @@ db.function('social_lower',s=>String(s||'').toLocaleLowerCase('ru'));
 const person=u=>({id:u.id,username:u.username,displayName:u.display_name,avatarEmoji:u.avatar_emoji});
 function friends(a,b){return !!db.prepare("SELECT 1 FROM friendships WHERE status='accepted' AND ((requester_id=? AND addressee_id=?) OR (requester_id=? AND addressee_id=?))").get(a,b,b,a);}
 function member(c,u){return db.prepare('SELECT 1 FROM communities WHERE id=? AND owner_id=?').get(c,u)||db.prepare('SELECT 1 FROM community_members WHERE community_id=? AND user_id=?').get(c,u);}
+// Личные заметки и задачи пользователя (по 12 штук). У каждого аккаунта свои.
+function cleanNotes(body){
+ const text=v=>String(v==null?'':v).slice(0,2000);
+ const notes=[],tasks=[];
+ for(let i=0;i<12;i++){
+  const n=(Array.isArray(body.notes)&&body.notes[i])||{};notes.push({text:text(n.text)});
+  const t=(Array.isArray(body.tasks)&&body.tasks[i])||{};tasks.push({text:text(t.text),done:!!t.done&&!!text(t.text)});
+ }
+ return {notes,tasks};
+}
+router.get('/notes',requireAuth,(req,res)=>{
+ const row=db.prepare('SELECT data,updated_at FROM user_notes WHERE user_id=?').get(req.user.id);
+ let data=null;try{data=row?JSON.parse(row.data):null;}catch(e){}
+ res.json({...cleanNotes(data||{}),updatedAt:row?row.updated_at:0});
+});
+router.put('/notes',requireAuth,(req,res)=>{
+ const data=cleanNotes(req.body||{}),t=Date.now();
+ db.prepare('INSERT INTO user_notes (user_id,data,updated_at) VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at').run(req.user.id,JSON.stringify(data),t);
+ res.json({...data,updatedAt:t});
+});
 router.get('/friends/search',requireAuth,(req,res)=>{
  const q=String(req.query.q||'').trim().toLocaleLowerCase('ru').slice(0,80);
  if(q.length<2)return res.json({users:[]});
- const rows=db.prepare("SELECT id,username,display_name,avatar_emoji FROM users WHERE status='active' AND id<>? AND (instr(social_lower(display_name),?)>0 OR instr(social_lower(username),?)>0 OR social_lower(friend_code)=?) ORDER BY display_name LIMIT 30").all(req.user.id,q,q,q);
+ // Телефон и почта ищутся только по полному совпадению и никогда не показываются в результатах.
+ let digits=q.replace(/\D/g,'');if(digits.length===11&&digits[0]==='8')digits='7'+digits.slice(1);
+ const phone=/^[\d\s+()-]+$/.test(q)&&digits.length>=7?'+'+digits:'\u0000';
+ const rows=db.prepare("SELECT id,username,display_name,avatar_emoji FROM users WHERE status='active' AND id<>? AND (instr(social_lower(display_name),?)>0 OR instr(social_lower(username),?)>0 OR social_lower(friend_code)=? OR lower(email)=? OR phone=?) ORDER BY display_name LIMIT 30").all(req.user.id,q,q,q,q,phone);
  res.json({users:rows.map(u=>{const f=db.prepare('SELECT * FROM friendships WHERE (requester_id=? AND addressee_id=?) OR (requester_id=? AND addressee_id=?)').get(req.user.id,u.id,u.id,req.user.id);return {...person(u),relationship:f?f.status:null,incoming:!!f&&f.addressee_id===req.user.id,friendshipId:f&&f.id};})});
 });
 router.get('/friends/:userId/goals',requireAuth,(req,res,next)=>{try{
