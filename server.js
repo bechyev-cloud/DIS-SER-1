@@ -33,6 +33,15 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '2mb' }));
 
+// Счётчик изменений: растёт при любом успешном изменении данных на сервере.
+// Приложение сверяет его раз в пару секунд и, если он вырос, сразу обновляет данные.
+let changeSeq = 0; const changeBoot = Date.now();
+app.use('/api', function (req, res, next) {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') res.on('finish', function () { if (res.statusCode < 400) changeSeq++; });
+  next();
+});
+app.get('/api/changes', function (req, res) { res.set('Cache-Control', 'no-store'); res.json({ seq: changeBoot + ':' + changeSeq }); });
+
 // QR-коды и другие загруженные файлы отдаются статически. Никаких исполняемых типов —
 // multer на загрузке уже ограничивает расширения/MIME (см. routes/admin.js).
 app.use('/uploads', express.static(config.uploadDir, { maxAge: '1h', fallthrough: true, setHeaders: function (res) { res.set('X-Content-Type-Options', 'nosniff'); } }));
