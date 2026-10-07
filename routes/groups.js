@@ -184,7 +184,8 @@ router.get('/:id/overview', requireAuth, function (req, res, next) {
     const habits = db.prepare('SELECT id, name, emoji, type, config_json, target_user_id FROM habits WHERE group_id = ? AND assigned_by IS NOT NULL AND (target_user_id IS NULL OR target_user_id = ? OR ? = 1) ORDER BY created_at, id').all(g.id, req.user.id, isTrainer ? 1 : 0);
     const logQ = db.prepare('SELECT done FROM habit_logs WHERE habit_id = ? AND user_id = ? AND date_key = ?');
     const progQ = db.prepare('SELECT progress_json FROM habit_progress WHERE habit_id = ? AND user_id = ? AND date_key = ?');
-    const cells = {};
+    const cells = {}, raw = {};
+    const sumQ = db.prepare('SELECT progress_json FROM habit_progress WHERE habit_id = ? AND user_id = ? AND date_key <> ?');
     habits.forEach(function (h) {
       let cfg = {}; try { cfg = JSON.parse(h.config_json || '{}'); } catch (e) {}
       members.forEach(function (m) {
@@ -199,13 +200,17 @@ router.get('/:id/overview', requireAuth, function (req, res, next) {
           else if (Array.isArray(p.done) && Array.isArray(cfg.items) && cfg.items.length) pct = p.done.length / cfg.items.length * 100;
         }
         cells[m.id + ':' + h.id] = Math.max(0, Math.min(100, Math.round(pct) || 0));
+        // Сырые данные за день — приложение считает процент тем же способом, что и для своих задач.
+        const rowT = progQ.get(h.id, m.id, date); let pT = null; try { pT = rowT ? JSON.parse(rowT.progress_json || 'null') : null; } catch (e) {}
+        let before = 0; if (cfg.goal && cfg.goal.enabled) sumQ.all(h.id, m.id, date).forEach(function (r) { try { before += Number(JSON.parse(r.progress_json).goalAmount) || 0; } catch (e) {} });
+        raw[m.id + ':' + h.id] = { done: !!(log && log.done), p: pT, before: before };
       });
     });
     res.json({
       date: date, isTrainer: !!isTrainer, group: { id: g.id, name: g.name },
       members: members.map(function (m) { return { id: m.id, displayName: m.display_name, avatarEmoji: m.avatar_emoji, me: m.id === req.user.id }; }),
-      habits: habits.map(function (h) { return { id: h.id, name: h.name, emoji: h.emoji, targetUserId: h.target_user_id || null }; }),
-      cells: cells
+      habits: habits.map(function (h) { let c = {}; try { c = JSON.parse(h.config_json || '{}'); } catch (e) {} return { id: h.id, name: h.name, emoji: h.emoji, type: h.type, config: c, targetUserId: h.target_user_id || null }; }),
+      cells: cells, raw: raw
     });
   } catch (e) { next(e); }
 });
