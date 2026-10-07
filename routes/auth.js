@@ -69,6 +69,8 @@ router.post('/register', authLimiter, function (req, res, next) {
       VALUES (?,?,?,?,'USER',?,?,'active',?,?,?)`)
       .run(username, email, phone, hash, displayName, '🙂', friendCode(), t, t);
     db.prepare('INSERT INTO user_totals (user_id) VALUES (?)').run(info.lastInsertRowid);
+    // Отметка о согласии с политикой обработки персональных данных (дата и время принятия).
+    if (body.acceptPolicy === true) db.prepare('UPDATE users SET policy_accepted_at = ? WHERE id = ?').run(t, info.lastInsertRowid);
 
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
     const token = signToken(user);

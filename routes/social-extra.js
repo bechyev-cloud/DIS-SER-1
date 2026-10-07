@@ -40,7 +40,9 @@ router.get('/friends/:userId/goals',requireAuth,(req,res,next)=>{try{
  const user=db.prepare("SELECT * FROM users WHERE id=? AND status='active'").get(id);if(!user)throw forbidden('Профиль недоступен.');
  const goals=db.prepare('SELECT * FROM habits WHERE user_id=? AND assigned_by IS NULL AND group_id IS NULL').all(id).flatMap(h=>{
   let config;try{config=JSON.parse(h.config_json);}catch{return [];}
-  if(!['simple','checklist','zikr','timer','assignment'].includes(h.type)||['gym','diet','workout','nutrition','fitness'].some(k=>config.modes&&config.modes[k]))return [];
+  // Друзья видят только задачи, добавленные в разделе «Друзья» (config.shared).
+  if(config.shared!==true)return [];
+  if(!['simple','checklist','zikr','timer','assignment','workout'].includes(h.type)||['gym','diet','workout','nutrition','fitness'].some(k=>config.modes&&config.modes[k]))return [];
   const history=db.prepare('SELECT date_key AS date,done FROM habit_logs WHERE user_id=? AND habit_id=? ORDER BY date_key DESC').all(id,h.id);
   const progress=db.prepare('SELECT date_key AS date,progress_json FROM habit_progress WHERE user_id=? AND habit_id=? ORDER BY date_key DESC LIMIT 366').all(id,h.id).map(r=>{let p={};try{p=JSON.parse(r.progress_json);}catch{}return {date:r.date,amount:Number(p.goalAmount!=null?p.goalAmount:p.amount)||0,count:Number(p.count)||0,stepIndex:Number(p.stepIndex)||0,doneCount:Array.isArray(p.done)?p.done.length:0};});
   const goalEnabled=config.goal&&config.goal.enabled;const totalAmount=goalEnabled?db.prepare('SELECT progress_json FROM habit_progress WHERE user_id=? AND habit_id=?').all(id,h.id).reduce((sum,r)=>{try{return sum+(Number(JSON.parse(r.progress_json).goalAmount)||0);}catch{return sum;}},0):null;

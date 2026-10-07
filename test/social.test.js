@@ -30,7 +30,7 @@ test('social: explicit acceptance, private goals, group chat and revocation',asy
  assert.equal((await call(bob,'/friends/'+pending.friendshipId+'/accept','POST',{})).status,200);
  const Database=require('better-sqlite3'),db=new Database(path.join(a.dir,'database','discipline.sqlite'));
  const ins=db.prepare('INSERT INTO habits(id,user_id,name,type,config_json,created_at,updated_at,assigned_by) VALUES(?,?,?,?,?,?,?,?)');
- ins.run('personal',bob.user.id,'Чтение','simple','{}','2026-10-01',Date.now(),null);
+ ins.run('personal',bob.user.id,'Чтение','simple','{"shared":true}','2026-10-01',Date.now(),null);
  ins.run('private-workout',bob.user.id,'Тренировка','workout','{}','2026-10-01',Date.now(),null);
  ins.run('private-diet',bob.user.id,'Питание','simple',JSON.stringify({modes:{nutrition:{}}}),'2026-10-01',Date.now(),null);
  ins.run('private-assignment',bob.user.id,'От тренера','assignment','{}','2026-10-01',Date.now(),alice.user.id);

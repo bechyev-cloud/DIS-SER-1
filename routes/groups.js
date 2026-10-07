@@ -171,6 +171,45 @@ router.post('/:id/leave', requireAuth, function (req, res, next) {
 
 /* ---- trainer: assign habits/tasks to whole group or to one student (раздел 20) ---- */
 
+// Сводка группы за день: участники, задания и процент выполнения каждого задания каждым участником.
+// Тренер видит всё; участник видит общие задания группы и свои личные.
+router.get('/:id/overview', requireAuth, function (req, res, next) {
+  try {
+    const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(Number(req.params.id));
+    const isTrainer = g && g.trainer_id === req.user.id;
+    const allowed = g && (isTrainer || db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(g.id, req.user.id));
+    if (!allowed) throw badRequest('Группа недоступна.');
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? String(req.query.date) : new Date().toISOString().slice(0, 10);
+    const members = db.prepare(`SELECT u.id, u.display_name, u.avatar_emoji FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ? AND u.status = 'active' ORDER BY u.display_name`).all(g.id);
+    const habits = db.prepare('SELECT id, name, emoji, type, config_json, target_user_id FROM habits WHERE group_id = ? AND assigned_by IS NOT NULL AND (target_user_id IS NULL OR target_user_id = ? OR ? = 1) ORDER BY created_at, id').all(g.id, req.user.id, isTrainer ? 1 : 0);
+    const logQ = db.prepare('SELECT done FROM habit_logs WHERE habit_id = ? AND user_id = ? AND date_key = ?');
+    const progQ = db.prepare('SELECT progress_json FROM habit_progress WHERE habit_id = ? AND user_id = ? AND date_key = ?');
+    const cells = {};
+    habits.forEach(function (h) {
+      let cfg = {}; try { cfg = JSON.parse(h.config_json || '{}'); } catch (e) {}
+      members.forEach(function (m) {
+        if (h.target_user_id && h.target_user_id !== m.id) return;
+        const log = logQ.get(h.id, m.id, date); let pct = 0;
+        if (log && log.done) pct = 100;
+        else {
+          const row = progQ.get(h.id, m.id, date); let p = {}; try { p = row ? JSON.parse(row.progress_json || '{}') : {}; } catch (e) {}
+          const goal = cfg.goal && cfg.goal.enabled ? cfg.goal : null;
+          if (goal && p.goalAmount != null) pct = Number(p.goalAmount) / (Number(goal.daily || goal.total) || 1) * 100;
+          else if (p.amount != null) pct = Number(p.amount) / (Number(cfg.target) || 1) * 100;
+          else if (Array.isArray(p.done) && Array.isArray(cfg.items) && cfg.items.length) pct = p.done.length / cfg.items.length * 100;
+        }
+        cells[m.id + ':' + h.id] = Math.max(0, Math.min(100, Math.round(pct) || 0));
+      });
+    });
+    res.json({
+      date: date, isTrainer: !!isTrainer, group: { id: g.id, name: g.name },
+      members: members.map(function (m) { return { id: m.id, displayName: m.display_name, avatarEmoji: m.avatar_emoji, me: m.id === req.user.id }; }),
+      habits: habits.map(function (h) { return { id: h.id, name: h.name, emoji: h.emoji, targetUserId: h.target_user_id || null }; }),
+      cells: cells
+    });
+  } catch (e) { next(e); }
+});
+
 // Состав группы для её участника: тренер, участники и задания (общие и личные для него самого).
 router.get('/:id/roster', requireAuth, function (req, res, next) {
   try {
